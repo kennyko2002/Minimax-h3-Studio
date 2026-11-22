@@ -16,7 +16,8 @@ description: >-
    - **同場景連續戲份**：使用 **`MiniMaxH3ImageToVideo`（I2V）** 直接將上一幕尾幀接至 `first_frame`，達成第 0 幀像素級無縫接續，並在提示詞中重複鎖定角色五官、髮型與當前衣著／全裸狀態。
    - **需要製作首幀的時機**：僅在 **(a) 第 1 幕開場**、**(b) 重大時空／場景跳轉**（如室內白天切換至夜晚戶外）、**(c) 新空間／新核心角色首次登場**、或 **(d) 連續串接達 3～4 幕時，刻意安排一次「換鏡位／切角度」（如中景雙人切換為過肩特寫、側拍或反打鏡位）並製作新首幀重新錨定**——如此既能中斷 `I2V` 多代尾幀累加造成的變暗變糊，又能藉由自然剪輯切鏡消除重繪首幀的畫面割裂感（若需同時引入多張新圖或固定音色參考，可局部改用 `MiniMaxH3ReferenceToVideo`）。
 4. **提示詞格式**：
-   - 遵守 `h3-prompt-writing` 技能規範，**每幕皆須包含 `subject_definitions:`（定義 `<Picture 1>`、`<Subject 1>`、`<Subject 2>` 的五官、髮型、眼鏡與當前衣著／全裸狀態）、`retention_analysis:`、`detailed_description:`、`overall_soundscape:` 與 `non_diegetic_music:`**。
+   - 遵守 `h3-prompt-writing` 技能規範，**每幕皆須包含 `subject_definitions:`（定義 `<Picture 1>`、`<Subject 1>`、`<Subject 2>` 的五官、髮型、眼鏡與當前衣著／全裸狀態）、`summary:`、`retention_analysis:`、`detailed_description:`、`overall_soundscape:` 與 `non_diegetic_music:`**。
+   - **`summary:` 與動感對齊**：`summary:` 會直接影響模型對全域節奏與運鏡的判斷，須與 `detailed_description:` 的節奏、運鏡及鏡頭數保持一致，不可只寫靜態情節摘要。需要加強動感時，依該幕實際分鏡同步加入 `brisk physical motion`、`shifting camera framing`（若有 `[Shot 2]` 切鏡才加上 `and a cut to a tight reaction close-up`；若不影響下一幕尾幀清晰度，亦可酌加 `slight handheld camera movement`）。
    - I2V 提示詞開頭須帶標準前綴：`For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.`。
    - 中文對白原文保留於 `<d>[Chinese] ...</d>` 內（去除過度驚嘆號 `！` 以維持自然語氣），心聲／旁白使用 `says in an off-screen voiceover: <d>[Chinese] ...</d> while his/her lips remain completely closed`。
    - **男女聲調與配樂統一**：各幕 `overall_soundscape:` 應使用一致的男女聲線描述；若後製要自行混入連續配樂，各幕 `non_diegetic_music:` 統一設為 `None. Pure diegetic ambient sound and natural dialogue only, with no background music.`，避免每 10 秒出現斷裂的背景音樂。
