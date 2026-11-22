@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MiniMax H3 Drama Studio (768p I2V)</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #181c26;
+      --card: #1e2330;
+      --border: #2e3648;
+      --text: #e6eaf2;
+      --muted: #94a0b8;
+      --accent: #4f8cff;
+      --green: #2ecc71;
+      --warn: #f39c12;
+      --danger: #e74c3c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: #131722ee;
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    h1 {
+      font-size: 16px;
+      margin: 0;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+
+    select,
+    input,
+    textarea,
+    button {
+      font-family: inherit;
+      font-size: 13px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #111520;
+      color: var(--text);
+      padding: 6px 10px;
+    }
+
+    button {
+      cursor: pointer;
+      background: #263044;
+      border-color: #3a4763;
+      font-weight: 600;
+      transition: 0.15s;
+    }
+
+    button:hover {
+      background: #31405c;
+    }
+
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    button.primary:hover {
+      filter: brightness(1.1);
+    }
+
+    button.success {
+      background: #1f8b4c;
+      border-color: #2ecc71;
+      color: #fff;
+    }
+
+    button.warn {
+      background: #9c640c;
+      border-color: var(--warn);
+      color: #fff;
+    }
+
+    button.danger {
+      background: #992b22;
+      border-color: var(--danger);
+      color: #fff;
+    }
+
+    .status-pill {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #22293a;
+      color: var(--muted);
+    }
+
+    .status-pill.busy {
+      background: #3b2d12;
+      color: #ffd166;
+    }
+
+    main {
+      padding: 16px 20px 60px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    .helper-box {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      display: none;
+    }
+
+    .helper-box.open {
+      display: block;
+    }
+
+    .scenes-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+      gap: 16px;
+    }
+
+    .scene-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .scene-header {
+      background: #161a24;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .block {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .block:last-child {
+      border-bottom: none;
+    }
+
+    .block-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    textarea.prompt-box {
+      width: 100%;
+      min-height: 150px;
+      resize: vertical;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .zh-trans {
+      font-size: 12px;
+      color: #b8c4db;
+      background: #141824;
+      padding: 6px 8px;
+      border-radius: 6px;
+      margin-top: 6px;
+    }
+
+    .preview-img-wrap {
+      margin-top: 8px;
+      background: #0b0d13;
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      min-height: 130px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .preview-img-wrap img {
+      width: 100%;
+      max-height: 210px;
+      object-fit: contain;
+      display: block;
+    }
+
+    .placeholder {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 16px;
+      text-align: center;
+    }
+
+    video {
+      width: 100%;
+      border-radius: 6px;
+      background: #000;
+      max-height: 230px;
+    }
+
+    .post-panel {
+      margin-top: 24px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    @media (max-width: 960px) {
+      .post-panel {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .logs {
+      background: #0b0d13;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-family: monospace;
+      font-size: 11px;
+      color: #9ecbff;
+      max-height: 140px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="row">
+      <h1>H3 Drama Studio</h1>
+      <select id="scriptSelect" style="min-width: 260px;"></select>
+      <button onclick="refreshScripts()">重新掃描</button>
+      <button onclick="loadSelectedScript()" class="primary">載入腳本</button>
+      <button onclick="saveProject()">儲存並寫回 .md</button>
+      <button onclick="toggleHelper()">AI 腳本指令助手</button>
+    </div>
+    <div class="row">
+      <label>畫質：
+        <select id="qualitySelect">
+          <option value="low">Low (試跑)</option>
+          <option value="high" selected>High (+ 0.25 精修)</option>
+        </select>
+      </label>
+      <label>方向：
+        <select id="aspectSelect">
+          <option value="landscape" selected>橫式 16:9 (1344×768)</option>
+          <option value="portrait">直式 9:16 (768×1344)</option>
+        </select>
+      </label>
+      <button onclick="runAll()" class="success">全部執行</button>
+      <button onclick="cancelAll()" class="danger">停止取消</button>
+      <span id="statusPill" class="status-pill">待機中</span>
+    </div>
+  </header>
+
+  <main>
+    <div id="helperBox" class="helper-box">
+      <div class="row" style="justify-content: space-between; margin-bottom: 8px;">
+        <strong>貼上小說產生 Antigravity 分鏡指令（使用 h3-drama-script 技能）</strong>
+        <button onclick="toggleHelper()">收合</button>
+      </div>
+      <textarea id="novelInput" style="width:100%; min-height:90px;" placeholder="在此貼上小說原文..."></textarea>
+      <div class="row" style="margin-top:8px;">
+        <input id="targetMdName" type="text" value="new_drama_script.md" style="width:240px;"
+          placeholder="目標檔名 (.md)" />
+        <button class="primary" onclick="copyAntigravityPrompt()">一鍵複製給 Antigravity 的指令</button>
+        <span id="copyHint" style="font-size:12px; color:var(--green);"></span>
+      </div>
+    </div>
+
+    <div id="scenesGrid" class="scenes-grid"></div>
+
+    <section class="post-panel">
+      <div>
+        <h3 style="margin-top:0;">合併與繁中字幕後製</h3>
+        <div class="row" style="margin-bottom:10px;">
+          <label>合併來源：
+            <select id="mergePrefer">
+              <option value="high">優先取 High (1344×768)</option>
+              <option value="low">優先取 Low (672×384)</option>
+            </select>
+          </label>
+          <button id="btnMerge" class="primary" onclick="mergeClips()">1. 合併全部段落</button>
+          <button id="btnAsr" onclick="runAsr()">2. 語音辨識產生字幕</button>
+        </div>
+        <div id="postStatus" style="font-size:12px; color:var(--muted); margin-bottom:8px; min-height:18px;"></div>
+        <textarea id="srtEditor" style="width:100%; min-height:200px; font-family:monospace; font-size:12px;"
+          placeholder="這裡會顯示產生的 .srt 字幕，可直接手動修改後點「儲存字幕」或「壓制字幕」..."></textarea>
+        <div class="row" style="margin-top:10px;">
+          <button id="btnSaveSrt" onclick="saveSrt()">儲存字幕 (.srt)</button>
+          <label>連續配樂 (選用)：
+            <select id="bgmSelect">
+              <option value="">無額外配樂</option>
+            </select>
+          </label>
+          <button id="btnBurn" class="success" onclick="burnSubtitles()">3. 壓制字幕輸出成片</button>
+        </div>
+        <details open style="margin-top:12px;">
+          <summary style="cursor:pointer; font-size:13px; font-weight:700; color:var(--muted);">腳本原始台詞比對參考（各幕
+            &lt;d&gt;[Chinese]&lt;/d&gt;）</summary>
+          <div id="dialogueRefBox" class="logs" style="max-height:180px; color:#d8e1f0; margin-top:6px;">尚未載入腳本...</div>
+        </details>
+      </div>
+
+      <div>
+        <h3 style="margin-top:0;">成品預覽與 Tailscale 傳手機</h3>
+        <video id="finalVideo" controls style="max-height:280px;"></video>
+        <div class="row" style="margin-top:10px;">
+          <input id="finalVideoName" type="text" readonly style="flex:1;" placeholder="尚未產生合併或字幕成品" />
+          <input id="tailscaleTarget" type="text" value="{{ default_tailscale_target }}" placeholder="Tailscale 裝置名稱" style="width:150px;" />
+          <button id="btnTailscale" class="warn" onclick="sendTailscale()">傳送到手機</button>
+        </div>
+        <div id="logBox" class="logs">等待操作...</div>
+      </div>
+    </section>
+  </main>
+
+  <script>window.H3_SCRIPTS_DIR = {{ scripts_dir | tojson }};</script>
+  <script src="/static/studio.js?v=20261122d"></script>
+</body>
+
+</html>
