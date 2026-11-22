@@ -1,5 +1,7 @@
 # H3 Drama Studio
 
+English | [繁體中文說明](README.zh-TW.md)
+
 A lightweight Flask web UI for orchestrating multi-scene **MiniMax H3** drama / short-film workflows on top of **ComfyUI** — supporting Markdown storyboard import, I2V / Ref2V generation, 16:9 landscape & 9:16 portrait aspect ratios, lossless last-frame extraction with optional `RealESRGAN_x2plus` restoration, `ffmpeg` scene merging, Faster-Whisper + OpenCC Traditional Chinese subtitle generation & burning, and optional Tailscale mobile sharing.
 
 ## Features
