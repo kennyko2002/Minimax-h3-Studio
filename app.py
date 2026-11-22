@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """MiniMax H3 Drama Studio — Flask backend for 768p I2V/Ref2V storyboard workflow."""
 
+import difflib
 import glob
 import json
 import os
@@ -419,10 +420,61 @@ def get_duration(vpath: Path) -> float:
 
 
 def clean_zh_text(txt: str, cc: OpenCC) -> str:
-    txt = cc.convert(txt.strip())
-    for bad, good in [("雪力", "雪莉"), ("雪麗", "雪莉"), ("雪梨", "雪莉"), ("馬塞克", "馬賽克"), ("碼賽克", "馬賽克"), ("開包", "開苞")]:
-        txt = txt.replace(bad, good)
-    return txt
+    return cc.convert(txt.strip())
+
+
+def _norm_zh(txt: str) -> str:
+    return re.sub(r"[\s\W_]+", "", txt or "")
+
+
+def align_asr_with_script(seg_items: list[tuple[float, float, str]], script_lines: list[str]) -> list[tuple[float, float, str]]:
+    """Correct Whisper ASR homophones/typos using matching <d>[Chinese]</d> lines from the scene script."""
+    if not seg_items or not script_lines:
+        return seg_items
+
+    if len(seg_items) == len(script_lines):
+        out = []
+        for (s_t, e_t, txt), scr in zip(seg_items, script_lines):
+            ratio = difflib.SequenceMatcher(None, _norm_zh(txt), _norm_zh(scr)).ratio()
+            out.append((s_t, e_t, scr if ratio >= 0.45 else txt))
+        return out
+
+    if len(script_lines) == 1:
+        scr = script_lines[0]
+        joined = "".join(t for _, _, t in seg_items)
+        if difflib.SequenceMatcher(None, _norm_zh(joined), _norm_zh(scr)).ratio() >= 0.45:
+            return [(seg_items[0][0], seg_items[-1][1], scr)]
+
+    if len(seg_items) == 1 and len(script_lines) > 1:
+        s_t, e_t, txt = seg_items[0]
+        joined_scr = "".join(script_lines)
+        if difflib.SequenceMatcher(None, _norm_zh(txt), _norm_zh(joined_scr)).ratio() >= 0.45:
+            total_len = max(1, sum(len(_norm_zh(x)) or 1 for x in script_lines))
+            cur = s_t
+            out = []
+            for idx, scr in enumerate(script_lines):
+                w = (len(_norm_zh(scr)) or 1) / total_len
+                nxt = e_t if idx == len(script_lines) - 1 else min(e_t, cur + (e_t - s_t) * w)
+                out.append((cur, nxt, scr))
+                cur = nxt
+            return out
+
+    # General monotonic best-match per ASR segment
+    out = []
+    min_j = 0
+    for s_t, e_t, txt in seg_items:
+        best_j, best_r = -1, 0.0
+        nt = _norm_zh(txt)
+        for j in range(min_j, len(script_lines)):
+            r = difflib.SequenceMatcher(None, nt, _norm_zh(script_lines[j])).ratio()
+            if r > best_r:
+                best_r, best_j = r, j
+        if best_j >= 0 and best_r >= 0.5:
+            out.append((s_t, e_t, script_lines[best_j]))
+            min_j = best_j + 1
+        else:
+            out.append((s_t, e_t, txt))
+    return out
 
 
 @app.route("/")
@@ -703,7 +755,9 @@ def api_asr():
             if e_t > s_t + 0.15:
                 seg_items.append((s_t, e_t, txt))
 
-        if not seg_items and script_lines:
+        if seg_items and script_lines:
+            seg_items = align_asr_with_script(seg_items, script_lines)
+        elif not seg_items and script_lines:
             span = max(1.0, (dur - 1.0) / len(script_lines))
             for li, ltxt in enumerate(script_lines):
                 s_t = 0.5 + li * span
