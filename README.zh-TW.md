@@ -65,3 +65,4 @@
 ## 分鏡腳本規範
 
 腳本格式與 MiniMax-H3 提示詞撰寫原則請參考 [skills/h3-drama-script/SKILL.md](skills/h3-drama-script/SKILL.md)。
+

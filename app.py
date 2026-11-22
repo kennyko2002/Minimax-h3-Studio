@@ -208,7 +208,7 @@ def extract_last_frame(video_path: Path, out_name: str) -> str:
 
 
 def enhance_single_frame(img_name: str, width: int = 1344, height: int = 768) -> str:
-    """Restore sharpness and shadow brightness on a single frame via RealESRGAN_x2plus + mild gamma/unsharp."""
+    """Restore sharpness on a single frame via RealESRGAN_x2plus without altering gamma/brightness."""
     src = INPUT_DIR / img_name
     if not src.exists():
         raise FileNotFoundError(f"找不到圖片：{img_name}")
@@ -221,12 +221,8 @@ def enhance_single_frame(img_name: str, width: int = 1344, height: int = 768) ->
     }
     _, png_path = submit_comfy_and_wait(f"單幀修復-{img_name}", wf)
     if png_path and png_path.exists():
-        tmp_out = INPUT_DIR / f"_tmp_{img_name}.png"
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", str(png_path), "-vf", "eq=gamma=1.08:contrast=1.02,unsharp=5:5:0.4:5:5:0.0", str(tmp_out)],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        tmp_out.replace(src)
+        import shutil
+        shutil.copy2(png_path, src)
         try:
             png_path.unlink()
         except OSError:
@@ -392,7 +388,7 @@ def worker_loop() -> None:
                 log_msg(f"已擷取第 {scene_idx} 幕尾幀 -> {last_png}")
             w, h = resolve_dims(quality, aspect)
             enhance_single_frame(last_png, w, h)
-            log_msg(f"已完成尾幀 RealESRGAN 修復提亮 -> {last_png}")
+            log_msg(f"已完成尾幀 RealESRGAN 修復 -> {last_png}")
         except Exception as exc:
             log_msg(f"錯誤：{exc}")
             with STATE_LOCK:
