@@ -235,6 +235,88 @@ def shift_scene_files(slug: str, insert_idx: int, old_count: int) -> None:
             old_wav.rename(WORK_DIR / f"{slug}_s{new_idx:02d}.wav")
 
 
+def _renumber_md_sections(sections: list[str], start_pos: int, start_num: int) -> None:
+    cur_num = start_num
+    for i in range(start_pos, len(sections)):
+        if re.search(r"```(?:text)?\s*\n.*?\n```", sections[i], flags=re.DOTALL):
+            sections[i] = re.sub(r"^(##\s*)第\s*\d+\s*幕", rf"\g<1>第 {cur_num} 幕", sections[i], count=1, flags=re.MULTILINE)
+            sections[i] = re.sub(r"^(##\s*)S\d+\b", rf"\g<1>S{cur_num}", sections[i], count=1, flags=re.MULTILINE)
+            cur_num += 1
+
+
+def unshift_scene_files(slug: str, del_idx: int, old_count: int, trash_dir: Path | None = None) -> list[dict]:
+    """Move deleted scene's files to trash_dir (if given) and shift scenes > del_idx down by -1."""
+    moved: list[dict] = []
+    if trash_dir is not None:
+        import shutil
+        if trash_dir.exists():
+            shutil.rmtree(trash_dir)
+        trash_dir.mkdir(parents=True, exist_ok=True)
+        for q in ("low", "high"):
+            for directory, pref, pat in [
+                (OUTPUT_DIR, f"{slug}_s{del_idx:02d}_{q}_", "*.mp4"),
+                (OUTPUT_DIR, f"{slug}_rawlast_{del_idx:02d}_{q}_", "*.png"),
+                (INPUT_DIR, prev_last_frame_name(slug, del_idx, q), ""),
+            ]:
+                targets = [directory / pref] if pat == "" else list(directory.glob(f"{pref}{pat}"))
+                for src in targets:
+                    if src.exists():
+                        dst = trash_dir / src.name
+                        src.rename(dst)
+                        moved.append({"src": str(src), "dst": str(dst)})
+        wav = WORK_DIR / f"{slug}_s{del_idx:02d}.wav"
+        if wav.exists():
+            dst = trash_dir / wav.name
+            wav.rename(dst)
+            moved.append({"src": str(wav), "dst": str(dst)})
+
+    for old_idx in range(del_idx + 1, old_count + 1):
+        new_idx = old_idx - 1
+        for q in ("low", "high"):
+            _rename_prefixed_files(OUTPUT_DIR, f"{slug}_s{old_idx:02d}_{q}_", f"{slug}_s{new_idx:02d}_{q}_", "*.mp4")
+            _rename_prefixed_files(OUTPUT_DIR, f"{slug}_rawlast_{old_idx:02d}_{q}_", f"{slug}_rawlast_{new_idx:02d}_{q}_", "*.png")
+            old_last = INPUT_DIR / prev_last_frame_name(slug, old_idx, q)
+            if old_last.exists():
+                old_last.rename(INPUT_DIR / prev_last_frame_name(slug, new_idx, q))
+        old_wav = WORK_DIR / f"{slug}_s{old_idx:02d}.wav"
+        if old_wav.exists():
+            old_wav.rename(WORK_DIR / f"{slug}_s{new_idx:02d}.wav")
+    return moved
+
+
+def delete_scene_in_md(md_path: str, del_idx: int) -> None:
+    """Remove the `del_idx`-th scene section from .md and renumber subsequent headings."""
+    path = Path(md_path)
+    text = path.read_text(encoding="utf-8")
+    sections = re.split(r"(?=^##\s*(?:第\s*\d+\s*幕|S\d+\b)|^第\s*\d+\s*幕)", text, flags=re.MULTILINE)
+    scene_pos = [i for i, sec in enumerate(sections) if re.search(r"```(?:text)?\s*\n.*?\n```", sec, flags=re.DOTALL)]
+    if scene_pos and 1 <= del_idx <= len(scene_pos):
+        target_pos = scene_pos[del_idx - 1]
+        del sections[target_pos]
+        _renumber_md_sections(sections, target_pos, del_idx)
+        path.write_text("".join(sections), encoding="utf-8")
+        return
+
+    blocks = list(re.finditer(r"```(?:text)?\s*\n.*?\n```", text, flags=re.DOTALL))
+    if 1 <= del_idx <= len(blocks):
+        b = blocks[del_idx - 1]
+        path.write_text(text[:b.start()] + text[b.end():], encoding="utf-8")
+
+
+def _save_undo_snapshot(slug: str, md_path: str, action: str, idx: int, old_count: int, moved_files: list[dict] | None = None) -> None:
+    meta_path = WORK_DIR / f"{slug}_undo_meta.json"
+    jpath = project_json_path(md_path)
+    snap = {
+        "action": action,
+        "idx": idx,
+        "old_count": old_count,
+        "md_text": Path(md_path).read_text(encoding="utf-8"),
+        "proj_json": jpath.read_text(encoding="utf-8") if jpath.exists() else "",
+        "moved_files": moved_files or [],
+    }
+    meta_path.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+
+
 def insert_scene_in_md(md_path: str, after_idx: int, new_prompt: str) -> int:
     """Insert a new scene block after `after_idx` in the .md file and renumber subsequent headings."""
     path = Path(md_path)
@@ -718,6 +800,7 @@ def api_insert_scene():
     prev_scene = next((s for s in proj["scenes"] if s["idx"] == insert_idx - 1), None)
     new_prompt = build_continuation_prompt(prev_scene)
 
+    _save_undo_snapshot(proj["slug"], md_path, "insert", insert_idx, old_count)
     shift_scene_files(proj["slug"], insert_idx, old_count)
     insert_scene_in_md(md_path, insert_idx - 1, new_prompt)
 
@@ -747,6 +830,96 @@ def api_insert_scene():
 
     updated = load_or_sync_project(md_path)
     log_msg(f"已於第 {insert_idx - 1} 幕後插入新幕次（第 {insert_idx} 幕），其餘幕次與檔案已自動順移")
+    return jsonify(enrich_project(updated))
+
+
+@app.route("/api/scene/delete", methods=["POST"])
+def api_delete_scene():
+    with STATE_LOCK:
+        if RUNTIME_STATUS["busy"] or RUNTIME_STATUS["queued"]:
+            return jsonify({"error": "目前有生成任務執行中，請先等待完成或取消後再刪除幕次"}), 409
+    data = request.json or {}
+    md_path = data.get("md_path", "")
+    del_idx = int(data.get("idx", 0))
+    if not md_path or not Path(md_path).exists():
+        return jsonify({"error": "找不到指定的 .md 腳本檔案"}), 404
+
+    proj = load_or_sync_project(md_path)
+    old_count = len(proj["scenes"])
+    if old_count <= 1:
+        return jsonify({"error": "至少需保留 1 幕，無法刪除最後一幕"}), 400
+    if not (1 <= del_idx <= old_count):
+        return jsonify({"error": f"幕次編號超出範圍：{del_idx}"}), 400
+
+    slug = proj["slug"]
+    _save_undo_snapshot(slug, md_path, "delete", del_idx, old_count)
+    moved = unshift_scene_files(slug, del_idx, old_count, WORK_DIR / f"{slug}_undo_files")
+    # Update snapshot with moved file paths so undo restores deleted media too
+    meta_path = WORK_DIR / f"{slug}_undo_meta.json"
+    snap = json.loads(meta_path.read_text(encoding="utf-8"))
+    snap["moved_files"] = moved
+    meta_path.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+
+    delete_scene_in_md(md_path, del_idx)
+    remaining = []
+    for sc in proj["scenes"]:
+        if sc["idx"] == del_idx:
+            continue
+        if sc["idx"] > del_idx:
+            sc["idx"] -= 1
+        remaining.append(sc)
+    proj["scenes"] = remaining
+    save_project(proj)
+
+    updated = load_or_sync_project(md_path)
+    log_msg(f"已刪除第 {del_idx} 幕，後續幕次與檔案已自動遞補（可按「↩️ 復原幕次」還原）")
+    return jsonify(enrich_project(updated))
+
+
+@app.route("/api/scene/undo", methods=["POST"])
+def api_undo_scene():
+    with STATE_LOCK:
+        if RUNTIME_STATUS["busy"] or RUNTIME_STATUS["queued"]:
+            return jsonify({"error": "目前有生成任務執行中，請先等待完成或取消後再復原"}), 409
+    data = request.json or {}
+    md_path = data.get("md_path", "")
+    if not md_path or not Path(md_path).exists():
+        return jsonify({"error": "找不到指定的 .md 腳本檔案"}), 404
+
+    slug = project_slug(md_path)
+    meta_path = WORK_DIR / f"{slug}_undo_meta.json"
+    if not meta_path.exists():
+        return jsonify({"error": "沒有可復原的插入或刪除紀錄"}), 400
+
+    snap = json.loads(meta_path.read_text(encoding="utf-8"))
+    action = snap["action"]
+    idx = int(snap["idx"])
+    cur_proj = load_or_sync_project(md_path)
+    cur_count = len(cur_proj["scenes"])
+
+    if action == "insert":
+        # Reverse the insert: move any newly generated files at `idx` to trash and shift > idx down -1
+        unshift_scene_files(slug, idx, cur_count, WORK_DIR / f"{slug}_undo_files")
+    elif action == "delete":
+        # Reverse the delete: shift >= idx up +1 and restore deleted files from trash
+        shift_scene_files(slug, idx, cur_count)
+        for item in snap.get("moved_files", []):
+            dst = Path(item["dst"])
+            src = Path(item["src"])
+            if dst.exists():
+                src.parent.mkdir(parents=True, exist_ok=True)
+                dst.rename(src)
+
+    Path(md_path).write_text(snap["md_text"], encoding="utf-8")
+    if snap.get("proj_json"):
+        project_json_path(md_path).write_text(snap["proj_json"], encoding="utf-8")
+    try:
+        meta_path.unlink()
+    except OSError:
+        pass
+
+    updated = load_or_sync_project(md_path)
+    log_msg(f"已復原上一次{'插入' if action == 'insert' else '刪除'}幕次操作（第 {idx} 幕）")
     return jsonify(enrich_project(updated))
 
 
@@ -780,6 +953,7 @@ def enrich_project(proj: dict) -> dict:
     proj["script_dialogues"] = script_dialogues
     srt_file = OUTPUT_DIR / f"{slug}.srt"
     proj["srt_text"] = srt_file.read_text(encoding="utf-8") if srt_file.exists() else ""
+    proj["can_undo"] = (WORK_DIR / f"{slug}_undo_meta.json").exists()
     return proj
 
 

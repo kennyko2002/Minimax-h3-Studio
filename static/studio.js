@@ -119,6 +119,8 @@ async function saveProject() {
 }
 
 function renderScenes() {
+  const undoBtn = document.getElementById("btnUndo");
+  if (undoBtn) undoBtn.disabled = !Boolean(CURRENT_PROJECT?.can_undo);
   const grid = document.getElementById("scenesGrid");
   grid.innerHTML = "";
   const q = document.getElementById("qualitySelect").value;
@@ -166,6 +168,7 @@ function renderScenes() {
           <button onclick="runRange(${sc.idx}, ${sc.idx})" class="primary">跑這幕</button>
           <button onclick="runRange(${sc.idx}, ${CURRENT_PROJECT.scenes.length})">從這幕往後</button>
           <button onclick="insertSceneAfter(${sc.idx})" title="在此幕後方插入新的一幕（預設延續上一幀最後動作）">➕ 插入</button>
+          <button onclick="deleteScene(${sc.idx})" class="danger" title="刪除此幕並自動順移後續幕次">🗑️ 刪除</button>
         </div>
       </div>
 
@@ -286,6 +289,30 @@ async function insertSceneAfter(afterIdx) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ md_path: CURRENT_PROJECT.md_path, after_idx: afterIdx }),
+  });
+  renderScenes();
+  renderDialogueRef();
+}
+
+async function deleteScene(idx) {
+  if (!CURRENT_PROJECT) return;
+  if (!confirm(`確定要刪除第 ${idx} 幕嗎？（後續幕次與影片檔會自動遞補，也可按「復原幕次」還原）`)) return;
+  await saveProject();
+  CURRENT_PROJECT = await api("/api/scene/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ md_path: CURRENT_PROJECT.md_path, idx }),
+  });
+  renderScenes();
+  renderDialogueRef();
+}
+
+async function undoSceneOp() {
+  if (!CURRENT_PROJECT) return;
+  CURRENT_PROJECT = await api("/api/scene/undo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ md_path: CURRENT_PROJECT.md_path }),
   });
   renderScenes();
   renderDialogueRef();

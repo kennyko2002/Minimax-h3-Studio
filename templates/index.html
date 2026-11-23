@@ -282,6 +282,7 @@
       <button onclick="refreshScripts()">重新掃描</button>
       <button onclick="loadSelectedScript()" class="primary">載入腳本</button>
       <button onclick="saveProject()">儲存並寫回 .md</button>
+      <button id="btnUndo" onclick="undoSceneOp()" disabled title="復原上一次插入或刪除幕次">↩️ 復原幕次</button>
       <button onclick="toggleHelper()">AI 腳本指令助手</button>
     </div>
     <div class="row">
@@ -370,7 +371,7 @@
     window.H3_HAS_HMPUSSY = {{ has_hmpussy | tojson }};
     window.H3_HAS_HMPENIS = {{ has_hmpenis | tojson }};
   </script>
-  <script src="/static/studio.js?v=20261123c"></script>
+  <script src="/static/studio.js?v=20261123d"></script>
 </body>
 
 </html>
