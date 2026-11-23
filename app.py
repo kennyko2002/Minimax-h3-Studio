@@ -162,8 +162,8 @@ def load_or_sync_project(md_path: str) -> dict:
     for sc in md_scenes:
         old = saved_by_idx.get(sc["idx"])
         if old:
-            for k in ("seed", "node_mode", "input_mode", "custom_image", "ref_images"):
-                if k in old and old[k] not in (None, ""):
+            for k in ("seed", "node_mode", "input_mode", "custom_image", "ref_images", "use_hmpussy", "use_hmpenis"):
+                if k in old and old[k] is not None and (old[k] != "" or k in ("use_hmpussy", "use_hmpenis")):
                     sc[k] = old[k]
         merged.append(sc)
 
@@ -183,6 +183,115 @@ def load_or_sync_project(md_path: str) -> dict:
 def save_project(proj: dict) -> None:
     jpath = project_json_path(proj["md_path"])
     jpath.write_text(json.dumps(proj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def build_continuation_prompt(prev_scene: dict | None) -> str:
+    """Build a default H3 continuation prompt that seamlessly continues the previous frame's last action."""
+    subj_block = (
+        "<Picture 1> is the starting frame continuing seamlessly from the previous scene's final frame.\n"
+        "<Subject 1> retains the exact appearance, hairstyle, expression, and clothing/state from <Picture 1>."
+    )
+    if prev_scene and prev_scene.get("prompt"):
+        m = re.search(r"subject_definitions:\s*\n(.*?)(?=\n(?:summary|retention_analysis|detailed_description):|\Z)", prev_scene["prompt"], flags=re.DOTALL)
+        if m and m.group(1).strip():
+            subj_block = m.group(1).strip()
+
+    return (
+        "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\n"
+        f"subject_definitions:\n{subj_block}\n\n"
+        "summary:\n"
+        "[video continuation] Continuing seamlessly from the final frame and ongoing motion of the previous shot, preserving all subjects' appearance, clothing, lighting, and spatial layout while developing the last action smoothly forward.\n\n"
+        "retention_analysis:\n"
+        "<Picture 1> ([Shot 1] first frame): fully_preserved - the exact posture, expression, clothing, lighting, and environment from the previous scene's final frame are retained at 0.00 seconds.\n\n"
+        "detailed_description:\n"
+        "[Shot 1] Live-action, cinematic, continuing seamlessly from the exact posture, momentum, and last ongoing action shown in <Picture 1>. From 00:00.000 to 00:10.000, the movement from the final frame of the previous shot carries forward naturally and smoothly without resetting or jumping, keeping the camera perspective, lighting, and subject details consistent throughout.\n\n"
+        "overall_soundscape:\n"
+        "Natural continuous room tone and subtle physical movement sounds matching the ongoing action.\n\n"
+        "non_diegetic_music:\n"
+        "None. Pure diegetic ambient sound and natural dialogue only, with no background music."
+    )
+
+
+def _rename_prefixed_files(directory: Path, old_prefix: str, new_prefix: str, suffix_glob: str) -> None:
+    if not directory.exists():
+        return
+    for p in list(directory.glob(f"{old_prefix}{suffix_glob}")):
+        new_name = new_prefix + p.name[len(old_prefix):]
+        p.rename(directory / new_name)
+
+
+def shift_scene_files(slug: str, insert_idx: int, old_count: int) -> None:
+    """Shift generated video/frame/wav filenames for scenes >= insert_idx up by +1 in reverse order."""
+    for old_idx in range(old_count, insert_idx - 1, -1):
+        new_idx = old_idx + 1
+        for q in ("low", "high"):
+            _rename_prefixed_files(OUTPUT_DIR, f"{slug}_s{old_idx:02d}_{q}_", f"{slug}_s{new_idx:02d}_{q}_", "*.mp4")
+            _rename_prefixed_files(OUTPUT_DIR, f"{slug}_rawlast_{old_idx:02d}_{q}_", f"{slug}_rawlast_{new_idx:02d}_{q}_", "*.png")
+            old_last = INPUT_DIR / prev_last_frame_name(slug, old_idx, q)
+            if old_last.exists():
+                old_last.rename(INPUT_DIR / prev_last_frame_name(slug, new_idx, q))
+        old_wav = WORK_DIR / f"{slug}_s{old_idx:02d}.wav"
+        if old_wav.exists():
+            old_wav.rename(WORK_DIR / f"{slug}_s{new_idx:02d}.wav")
+
+
+def insert_scene_in_md(md_path: str, after_idx: int, new_prompt: str) -> int:
+    """Insert a new scene block after `after_idx` in the .md file and renumber subsequent headings."""
+    path = Path(md_path)
+    text = path.read_text(encoding="utf-8")
+    insert_idx = max(1, after_idx + 1)
+    new_block = (
+        f"\n## 第 {insert_idx} 幕（插入延續）\n\n"
+        f"```text\n{new_prompt.strip()}\n```\n\n"
+        "**繁體中文翻譯：**\n延續上一幕最後一幀的動作自然接續發展。\n"
+    )
+
+    sections = re.split(r"(?=^##\s*(?:第\s*\d+\s*幕|S\d+\b)|^第\s*\d+\s*幕)", text, flags=re.MULTILINE)
+    scene_pos = [i for i, sec in enumerate(sections) if re.search(r"```(?:text)?\s*\n.*?\n```", sec, flags=re.DOTALL)]
+
+    if scene_pos:
+        if after_idx <= 0:
+            target_pos = scene_pos[0]
+            sections.insert(target_pos, new_block)
+            start_renum = target_pos + 1
+        elif after_idx <= len(scene_pos):
+            target_pos = scene_pos[after_idx - 1]
+            sections.insert(target_pos + 1, new_block)
+            start_renum = target_pos + 2
+        else:
+            sections.append(new_block)
+            start_renum = len(sections)
+
+        cur_num = insert_idx + 1
+        for i in range(start_renum, len(sections)):
+            if re.search(r"```(?:text)?\s*\n.*?\n```", sections[i], flags=re.DOTALL):
+                sections[i] = re.sub(
+                    r"^(##\s*)第\s*\d+\s*幕",
+                    rf"\g<1>第 {cur_num} 幕",
+                    sections[i],
+                    count=1,
+                    flags=re.MULTILINE,
+                )
+                sections[i] = re.sub(
+                    r"^(##\s*)S\d+\b",
+                    rf"\g<1>S{cur_num}",
+                    sections[i],
+                    count=1,
+                    flags=re.MULTILINE,
+                )
+                cur_num += 1
+        path.write_text("".join(sections), encoding="utf-8")
+        return insert_idx
+
+    # Fallback: .md only has bare ``` blocks without ## headings
+    blocks = list(re.finditer(r"```(?:text)?\s*\n.*?\n```", text, flags=re.DOTALL))
+    if not blocks:
+        path.write_text(text.rstrip() + "\n" + new_block, encoding="utf-8")
+        return 1
+    pos = blocks[0].start() if after_idx <= 0 else blocks[min(after_idx, len(blocks)) - 1].end()
+    updated = text[:pos] + "\n" + new_block + text[pos:]
+    path.write_text(updated, encoding="utf-8")
+    return insert_idx
 
 
 def find_scene_videos(slug: str, idx: int) -> dict:
@@ -590,6 +699,55 @@ def api_save_project():
     save_project(proj)
     write_prompts_back_to_md(md_path, proj["scenes"])
     return jsonify(enrich_project(proj))
+
+
+@app.route("/api/scene/insert", methods=["POST"])
+def api_insert_scene():
+    with STATE_LOCK:
+        if RUNTIME_STATUS["busy"] or RUNTIME_STATUS["queued"]:
+            return jsonify({"error": "目前有生成任務執行中，請先等待完成或取消後再插入幕次"}), 409
+    data = request.json or {}
+    md_path = data.get("md_path", "")
+    after_idx = int(data.get("after_idx", 1))
+    if not md_path or not Path(md_path).exists():
+        return jsonify({"error": "找不到指定的 .md 腳本檔案"}), 404
+
+    proj = load_or_sync_project(md_path)
+    old_count = len(proj["scenes"])
+    insert_idx = max(1, min(after_idx + 1, old_count + 1))
+    prev_scene = next((s for s in proj["scenes"] if s["idx"] == insert_idx - 1), None)
+    new_prompt = build_continuation_prompt(prev_scene)
+
+    shift_scene_files(proj["slug"], insert_idx, old_count)
+    insert_scene_in_md(md_path, insert_idx - 1, new_prompt)
+
+    shifted_scenes = []
+    for sc in proj["scenes"]:
+        if sc["idx"] >= insert_idx:
+            sc["idx"] += 1
+        shifted_scenes.append(sc)
+    new_scene_meta = {
+        "idx": insert_idx,
+        "title": f"第 {insert_idx} 幕（插入延續）",
+        "prompt": new_prompt,
+        "zh_translation": "延續上一幕最後一幀的動作自然接續發展。",
+        "recommend_text": "建議：上傳／選擇自訂首幀（開場）" if insert_idx == 1 else f"建議：沿用第 {insert_idx - 1} 幕無損尾幀（延續上一幀動作）",
+        "seed": 500100 + insert_idx,
+        "node_mode": "i2v",
+        "input_mode": "custom" if insert_idx == 1 else "prev_last",
+        "custom_image": "",
+        "ref_images": [],
+        "use_hmpussy": bool(prev_scene.get("use_hmpussy", False)) if prev_scene else False,
+        "use_hmpenis": bool(prev_scene.get("use_hmpenis", False)) if prev_scene else False,
+    }
+    shifted_scenes.append(new_scene_meta)
+    shifted_scenes.sort(key=lambda s: s["idx"])
+    proj["scenes"] = shifted_scenes
+    save_project(proj)
+
+    updated = load_or_sync_project(md_path)
+    log_msg(f"已於第 {insert_idx - 1} 幕後插入新幕次（第 {insert_idx} 幕），其餘幕次與檔案已自動順移")
+    return jsonify(enrich_project(updated))
 
 
 def enrich_project(proj: dict) -> dict:

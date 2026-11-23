@@ -165,6 +165,7 @@ function renderScenes() {
           </label>
           <button onclick="runRange(${sc.idx}, ${sc.idx})" class="primary">跑這幕</button>
           <button onclick="runRange(${sc.idx}, ${CURRENT_PROJECT.scenes.length})">從這幕往後</button>
+          <button onclick="insertSceneAfter(${sc.idx})" title="在此幕後方插入新的一幕（預設延續上一幀最後動作）">➕ 插入</button>
         </div>
       </div>
 
@@ -276,6 +277,18 @@ function runAll() {
 
 async function cancelAll() {
   await api("/api/scene/cancel", { method: "POST" });
+}
+
+async function insertSceneAfter(afterIdx) {
+  if (!CURRENT_PROJECT) return;
+  await saveProject();
+  CURRENT_PROJECT = await api("/api/scene/insert", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ md_path: CURRENT_PROJECT.md_path, after_idx: afterIdx }),
+  });
+  renderScenes();
+  renderDialogueRef();
 }
 
 async function withLoading(btnId, busyText, statusMsg, fn) {
