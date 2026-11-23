@@ -243,10 +243,11 @@ async function runRange(fromIdx, toIdx) {
   await saveProject();
   const quality = document.getElementById("qualitySelect").value;
   const aspect = document.getElementById("aspectSelect").value;
+  const use_hmpussy = Boolean(document.getElementById("hmpussyCheck")?.checked);
   await api("/api/scene/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ md_path: CURRENT_PROJECT.md_path, from_idx: fromIdx, to_idx: toIdx, quality, aspect }),
+    body: JSON.stringify({ md_path: CURRENT_PROJECT.md_path, from_idx: fromIdx, to_idx: toIdx, quality, aspect, use_hmpussy }),
   });
 }
 

@@ -24,6 +24,7 @@ COMFY_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188")
 BASE_DIR = Path(os.environ.get("COMFYUI_BASE_DIR", str(STUDIO_DIR.parent)))
 INPUT_DIR = Path(os.environ.get("COMFYUI_INPUT_DIR", str(BASE_DIR / "input")))
 OUTPUT_DIR = Path(os.environ.get("COMFYUI_OUTPUT_DIR", str(BASE_DIR / "output")))
+LORAS_DIR = Path(os.environ.get("COMFYUI_LORAS_DIR", str(BASE_DIR / "models" / "loras")))
 BRIDGE_DIR = Path(os.environ.get("H3_SCRIPTS_DIR", str(STUDIO_DIR / "scripts")))
 PROJECTS_DIR = STUDIO_DIR / "projects"
 WORK_DIR = OUTPUT_DIR / "h3_studio_work"
@@ -236,7 +237,14 @@ def resolve_dims(quality: str, aspect: str = "landscape") -> tuple[int, int]:
     return (h, w) if aspect == "portrait" else (w, h)
 
 
-def build_comfy_workflow(slug: str, scene: dict, quality: str, first_img: str, aspect: str = "landscape") -> dict:
+def has_hmpussy_loras() -> bool:
+    return (
+        (LORAS_DIR / "hmpussy_v6_epoch30.safetensors").exists()
+        and (LORAS_DIR / "vagassist_e40.safetensors").exists()
+    )
+
+
+def build_comfy_workflow(slug: str, scene: dict, quality: str, first_img: str, aspect: str = "landscape", use_hmpussy: bool = False) -> dict:
     width, height = resolve_dims(quality, aspect)
     prompt_text = scene["prompt"].strip()
     node_mode = scene.get("node_mode", "i2v")
@@ -249,7 +257,15 @@ def build_comfy_workflow(slug: str, scene: dict, quality: str, first_img: str, a
     wf = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors", "weight_dtype": "default"}},
         "2": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["1", 0], "lora_name": "pika_h3_flex_fl2va_v1_bf16.safetensors", "strength_model": 1.0}},
-        "3": {"class_type": "BlockSparseAttention", "inputs": {"model": ["2", 0], "selection": "sol-attn", "selection.tau": 1.3, "start_percent": 0.2, "end_percent": 1.0, "dense_blocks": "", "min_tokens": 12288, "extra_tokens": 256, "sink_conditioning": "exact_kv_and_rows", "verbose": False}},
+    }
+    model_ref = ["2", 0]
+    if use_hmpussy and has_hmpussy_loras():
+        wf["20"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": model_ref, "lora_name": "hmpussy_v6_epoch30.safetensors", "strength_model": 0.35}}
+        wf["21"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["20", 0], "lora_name": "vagassist_e40.safetensors", "strength_model": 1.0}}
+        model_ref = ["21", 0]
+
+    wf.update({
+        "3": {"class_type": "BlockSparseAttention", "inputs": {"model": model_ref, "selection": "sol-attn", "selection.tau": 1.3, "start_percent": 0.2, "end_percent": 1.0, "dense_blocks": "", "min_tokens": 12288, "extra_tokens": 256, "sink_conditioning": "exact_kv_and_rows", "verbose": False}},
         "4": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors", "type": "minimax", "device": "default"}},
         "5": {"class_type": "VAELoader", "inputs": {"vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"}},
         "6": {"class_type": "VAELoader", "inputs": {"vae_name": "minimax_h3_audio_vae_fp32.safetensors"}},
@@ -258,7 +274,7 @@ def build_comfy_workflow(slug: str, scene: dict, quality: str, first_img: str, a
         "10": {"class_type": "ManualSigmas", "inputs": {"sigmas": "1.0, 0.972973, 0.923077, 0.8, 0.571429, 0.333333, 0.0"}},
         "11": {"class_type": "RandomNoise", "inputs": {"noise_seed": int(scene["seed"])}},
         "12": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": ["11", 0], "guider": ["8", 0], "sampler": ["9", 0], "sigmas": ["10", 0], "latent_image": ["7", 1]}},
-    }
+    })
 
     if node_mode == "ref2v":
         ref_list = [first_img] + [r for r in scene.get("ref_images", []) if r and r != first_img]
@@ -371,12 +387,14 @@ def worker_loop() -> None:
             slug = proj["slug"]
             quality = task["quality"]
             aspect = task.get("aspect", "landscape")
+            use_hmpussy = bool(task.get("use_hmpussy", False))
             scene_idx = task["idx"]
             scene = next(s for s in proj["scenes"] if s["idx"] == scene_idx)
 
             first_img = resolve_input_image(slug, scene, quality)
-            log_msg(f"第 {scene_idx} 幕 ({quality}/{aspect}) 使用輸入圖: {first_img}")
-            wf = build_comfy_workflow(slug, scene, quality, first_img, aspect=aspect)
+            lora_tag = " + HMPussy v0.5" if (use_hmpussy and has_hmpussy_loras()) else ""
+            log_msg(f"第 {scene_idx} 幕 ({quality}/{aspect}{lora_tag}) 使用輸入圖: {first_img}")
+            wf = build_comfy_workflow(slug, scene, quality, first_img, aspect=aspect, use_hmpussy=use_hmpussy)
             out_video, raw_png = submit_comfy_and_wait(f"第{scene_idx}幕-{quality}", wf)
 
             last_png = prev_last_frame_name(slug, scene_idx, quality)
@@ -483,6 +501,7 @@ def index():
         "index.html",
         scripts_dir=str(BRIDGE_DIR),
         default_tailscale_target=DEFAULT_TAILSCALE_TARGET,
+        has_hmpussy=has_hmpussy_loras(),
     )
 
 
@@ -613,6 +632,7 @@ def api_run_scenes():
     to_idx = int(data.get("to_idx", from_idx))
     quality = data.get("quality", "low")
     aspect = data.get("aspect", "landscape")
+    use_hmpussy = bool(data.get("use_hmpussy", False))
     if quality not in ("low", "high"):
         return jsonify({"error": "quality 必須為 low 或 high"}), 400
     if aspect not in ("landscape", "portrait"):
@@ -626,7 +646,7 @@ def api_run_scenes():
             label = f"第{sc['idx']}幕 ({quality}/{aspect})"
             with STATE_LOCK:
                 RUNTIME_STATUS["queued"].append(label)
-            JOB_QUEUE.put({"md_path": md_path, "idx": sc["idx"], "quality": quality, "aspect": aspect, "label": label})
+            JOB_QUEUE.put({"md_path": md_path, "idx": sc["idx"], "quality": quality, "aspect": aspect, "use_hmpussy": use_hmpussy, "label": label})
             queued_labels.append(label)
     return jsonify({"queued": queued_labels})
 
