@@ -297,10 +297,6 @@
           <option value="portrait">直式 9:16 (768×1344)</option>
         </select>
       </label>
-      <label style="display:flex; align-items:center; gap:5px; cursor:pointer;" title="串接 hmpussy_v6_epoch30 (0.35) + vagassist_e40 (1.0)">
-        <input id="hmpussyCheck" type="checkbox" {% if has_hmpussy %}checked{% else %}disabled{% endif %} />
-        HMPussy v0.5
-      </label>
       <button onclick="runAll()" class="success">全部執行</button>
       <button onclick="cancelAll()" class="danger">停止取消</button>
       <span id="statusPill" class="status-pill">待機中</span>
@@ -369,8 +365,12 @@
     </section>
   </main>
 
-  <script>window.H3_SCRIPTS_DIR = {{ scripts_dir | tojson }};</script>
-  <script src="/static/studio.js?v=20261123a"></script>
+  <script>
+    window.H3_SCRIPTS_DIR = {{ scripts_dir | tojson }};
+    window.H3_HAS_HMPUSSY = {{ has_hmpussy | tojson }};
+    window.H3_HAS_HMPENIS = {{ has_hmpenis | tojson }};
+  </script>
+  <script src="/static/studio.js?v=20261123b"></script>
 </body>
 
 </html>

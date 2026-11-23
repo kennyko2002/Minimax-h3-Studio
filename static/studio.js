@@ -95,11 +95,15 @@ function collectSceneEdits() {
     const mEl = document.getElementById(`mode_${sc.idx}`);
     const iEl = document.getElementById(`inmode_${sc.idx}`);
     const cEl = document.getElementById(`custom_${sc.idx}`);
+    const hpEl = document.getElementById(`hmpussy_${sc.idx}`);
+    const hpnEl = document.getElementById(`hmpenis_${sc.idx}`);
     if (pEl) sc.prompt = pEl.value;
     if (sEl) sc.seed = parseInt(sEl.value || "500100", 10);
     if (mEl) sc.node_mode = mEl.value;
     if (iEl) sc.input_mode = iEl.value;
     if (cEl) sc.custom_image = cEl.value;
+    if (hpEl) sc.use_hmpussy = hpEl.checked;
+    if (hpnEl) sc.use_hmpenis = hpnEl.checked;
   });
 }
 
@@ -140,10 +144,25 @@ function renderScenes() {
          <div style="font-size:11px; color:var(--muted); margin-top:4px;">目前顯示: ${activeVid} ${lowVid && highVid ? "(Low/High 皆有)" : ""}</div>`
       : `<div class="placeholder">尚未生成影片</div>`;
 
+    const usePussy = sc.use_hmpussy !== undefined
+      ? Boolean(sc.use_hmpussy)
+      : (Boolean(window.H3_HAS_HMPUSSY) && /\b(hmpussy|vagina|vulva|pussy)\b/i.test(sc.prompt || ""));
+    const usePenis = sc.use_hmpenis !== undefined
+      ? Boolean(sc.use_hmpenis)
+      : (Boolean(window.H3_HAS_HMPENIS) && /\b(hmpenis|penis|cock)\b/i.test(sc.prompt || ""));
+
     card.innerHTML = `
       <div class="scene-header">
         <span>${sc.title}</span>
         <div class="row">
+          <label style="font-size:11px; font-weight:400; display:flex; align-items:center; gap:3px; cursor:pointer;" title="此幕套用 HMPussy v0.5">
+            <input id="hmpussy_${sc.idx}" type="checkbox" ${usePussy ? "checked" : ""} ${window.H3_HAS_HMPUSSY ? "" : "disabled"} onchange="onFieldChange(${sc.idx})" />
+            Pussy
+          </label>
+          <label style="font-size:11px; font-weight:400; display:flex; align-items:center; gap:3px; cursor:pointer;" title="此幕套用 HMPenis v2.0">
+            <input id="hmpenis_${sc.idx}" type="checkbox" ${usePenis ? "checked" : ""} ${window.H3_HAS_HMPENIS ? "" : "disabled"} onchange="onFieldChange(${sc.idx})" />
+            Penis
+          </label>
           <button onclick="runRange(${sc.idx}, ${sc.idx})" class="primary">跑這幕</button>
           <button onclick="runRange(${sc.idx}, ${CURRENT_PROJECT.scenes.length})">從這幕往後</button>
         </div>
@@ -243,11 +262,10 @@ async function runRange(fromIdx, toIdx) {
   await saveProject();
   const quality = document.getElementById("qualitySelect").value;
   const aspect = document.getElementById("aspectSelect").value;
-  const use_hmpussy = Boolean(document.getElementById("hmpussyCheck")?.checked);
   await api("/api/scene/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ md_path: CURRENT_PROJECT.md_path, from_idx: fromIdx, to_idx: toIdx, quality, aspect, use_hmpussy }),
+    body: JSON.stringify({ md_path: CURRENT_PROJECT.md_path, from_idx: fromIdx, to_idx: toIdx, quality, aspect }),
   });
 }
 

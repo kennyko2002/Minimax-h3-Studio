@@ -244,7 +244,22 @@ def has_hmpussy_loras() -> bool:
     )
 
 
-def build_comfy_workflow(slug: str, scene: dict, quality: str, first_img: str, aspect: str = "landscape", use_hmpussy: bool = False) -> dict:
+def get_hmpenis_lora() -> str | None:
+    for name in ("PenisV2_minimax-h3_epoch60.safetensors", "HMPenis_v2_e35.safetensors"):
+        if (LORAS_DIR / name).exists():
+            return name
+    return None
+
+
+def build_comfy_workflow(
+    slug: str,
+    scene: dict,
+    quality: str,
+    first_img: str,
+    aspect: str = "landscape",
+    use_hmpussy: bool = False,
+    use_hmpenis: bool = False,
+) -> dict:
     width, height = resolve_dims(quality, aspect)
     prompt_text = scene["prompt"].strip()
     node_mode = scene.get("node_mode", "i2v")
@@ -263,6 +278,10 @@ def build_comfy_workflow(slug: str, scene: dict, quality: str, first_img: str, a
         wf["20"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": model_ref, "lora_name": "hmpussy_v6_epoch30.safetensors", "strength_model": 0.35}}
         wf["21"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["20", 0], "lora_name": "vagassist_e40.safetensors", "strength_model": 1.0}}
         model_ref = ["21", 0]
+    penis_lora = get_hmpenis_lora()
+    if use_hmpenis and penis_lora:
+        wf["22"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": model_ref, "lora_name": penis_lora, "strength_model": 1.0}}
+        model_ref = ["22", 0]
 
     wf.update({
         "3": {"class_type": "BlockSparseAttention", "inputs": {"model": model_ref, "selection": "sol-attn", "selection.tau": 1.3, "start_percent": 0.2, "end_percent": 1.0, "dense_blocks": "", "min_tokens": 12288, "extra_tokens": 256, "sink_conditioning": "exact_kv_and_rows", "verbose": False}},
@@ -387,14 +406,23 @@ def worker_loop() -> None:
             slug = proj["slug"]
             quality = task["quality"]
             aspect = task.get("aspect", "landscape")
-            use_hmpussy = bool(task.get("use_hmpussy", False))
             scene_idx = task["idx"]
             scene = next(s for s in proj["scenes"] if s["idx"] == scene_idx)
+            use_hmpussy = bool(scene.get("use_hmpussy", False))
+            use_hmpenis = bool(scene.get("use_hmpenis", False))
 
             first_img = resolve_input_image(slug, scene, quality)
-            lora_tag = " + HMPussy v0.5" if (use_hmpussy and has_hmpussy_loras()) else ""
+            tags = []
+            if use_hmpussy and has_hmpussy_loras():
+                tags.append("HMPussy")
+            if use_hmpenis and get_hmpenis_lora():
+                tags.append("HMPenis")
+            lora_tag = f" + {'+'.join(tags)}" if tags else ""
             log_msg(f"第 {scene_idx} 幕 ({quality}/{aspect}{lora_tag}) 使用輸入圖: {first_img}")
-            wf = build_comfy_workflow(slug, scene, quality, first_img, aspect=aspect, use_hmpussy=use_hmpussy)
+            wf = build_comfy_workflow(
+                slug, scene, quality, first_img, aspect=aspect,
+                use_hmpussy=use_hmpussy, use_hmpenis=use_hmpenis,
+            )
             out_video, raw_png = submit_comfy_and_wait(f"第{scene_idx}幕-{quality}", wf)
 
             last_png = prev_last_frame_name(slug, scene_idx, quality)
@@ -502,6 +530,7 @@ def index():
         scripts_dir=str(BRIDGE_DIR),
         default_tailscale_target=DEFAULT_TAILSCALE_TARGET,
         has_hmpussy=has_hmpussy_loras(),
+        has_hmpenis=bool(get_hmpenis_lora()),
     )
 
 
@@ -553,7 +582,7 @@ def api_save_project():
     for sc in proj["scenes"]:
         inc = incoming_by_idx.get(sc["idx"])
         if inc:
-            for k in ("prompt", "seed", "node_mode", "input_mode", "custom_image", "ref_images"):
+            for k in ("prompt", "seed", "node_mode", "input_mode", "custom_image", "ref_images", "use_hmpussy", "use_hmpenis"):
                 if k in inc:
                     sc[k] = inc[k]
     if "bgm_path" in data:
@@ -632,7 +661,6 @@ def api_run_scenes():
     to_idx = int(data.get("to_idx", from_idx))
     quality = data.get("quality", "low")
     aspect = data.get("aspect", "landscape")
-    use_hmpussy = bool(data.get("use_hmpussy", False))
     if quality not in ("low", "high"):
         return jsonify({"error": "quality 必須為 low 或 high"}), 400
     if aspect not in ("landscape", "portrait"):
@@ -646,7 +674,7 @@ def api_run_scenes():
             label = f"第{sc['idx']}幕 ({quality}/{aspect})"
             with STATE_LOCK:
                 RUNTIME_STATUS["queued"].append(label)
-            JOB_QUEUE.put({"md_path": md_path, "idx": sc["idx"], "quality": quality, "aspect": aspect, "use_hmpussy": use_hmpussy, "label": label})
+            JOB_QUEUE.put({"md_path": md_path, "idx": sc["idx"], "quality": quality, "aspect": aspect, "label": label})
             queued_labels.append(label)
     return jsonify({"queued": queued_labels})
 
